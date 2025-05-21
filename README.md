@@ -1,2 +1,1 @@
-# l1
-A project code named L1
+This is not actually purported to be a public repo, but I don't mind it to be to take advantage of the free CI/CD tier.
