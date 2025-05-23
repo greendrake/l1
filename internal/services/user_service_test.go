@@ -3,50 +3,22 @@ package services
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
 	"errors"
-	"github.com/joho/godotenv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"greendrake/l1/internal/models"
 	"greendrake/l1/internal/utils"
 	"strings"
 )
 
-var testMongoURI string
-
-func init() {
-	// Get current file path
-	_, filename, _, _ := runtime.Caller(0)
-	// Try to load .env from project root (3 levels up from this file)
-	projectRoot := filepath.Join(filepath.Dir(filename), "..", "..")
-	if err := godotenv.Load(filepath.Join(projectRoot, ".env")); err != nil {
-		// Try current directory as fallback
-		godotenv.Load()
-	}
-
-	testMongoURI = os.Getenv("MONGO_URI_TEST")
-	if testMongoURI == "" {
-		panic("MONGO_URI_TEST environment variable is required for tests")
-	}
-}
-
 func setupTestDB(t *testing.T, dbName string) *mongo.Database {
-	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(testMongoURI))
-	require.NoError(t, err, "Failed to connect to MongoDB")
-	db := client.Database(dbName)
-	// Clean up collections
-	_ = db.Collection("users").Drop(context.Background())
-	return db
+	return utils.SetupTestDB(t, dbName, "users")
 }
 
 // Mock ILinkedActionService for user service tests
@@ -186,8 +158,8 @@ func TestUserService_EmailUniqueness(t *testing.T) {
 
 	newEmail := "new@example.com"
 	// Mock the linked action service call needed by RequestEmailChange
-	mockedOldAction := &models.LinkedAction{ID: utils.NewSixID()}
-	mockedNewAction := &models.LinkedAction{ID: utils.NewSixID()}
+	mockedOldAction := &models.LinkedAction{Base: models.NewBase()}
+	mockedNewAction := &models.LinkedAction{Base: models.NewBase()}
 	mockLAS.On("CreateEmailChangeActions", mock.Anything, user.ID, email, newEmail).Return(mockedOldAction, mockedNewAction, nil)
 
 	// Request the change
@@ -234,8 +206,8 @@ func TestUserService_RequestEmailChange(t *testing.T) {
 
 	newEmail := "new@example.com"
 	// Mock the linked action service call
-	mockedOldAction := &models.LinkedAction{ID: utils.NewSixID()}
-	mockedNewAction := &models.LinkedAction{ID: utils.NewSixID()}
+	mockedOldAction := &models.LinkedAction{Base: models.NewBase()}
+	mockedNewAction := &models.LinkedAction{Base: models.NewBase()}
 	mockLAS.On("CreateEmailChangeActions", mock.Anything, user.ID, user.Email, newEmail).Return(mockedOldAction, mockedNewAction, nil)
 
 	// Call the method under test - expecting 3 return values now
@@ -374,7 +346,7 @@ func setupUserWithEmailChange(t *testing.T, db *mongo.Database) (*models.User, *
 	ctx := context.Background()
 	coll := db.Collection("users")
 	user := &models.User{
-		ID:    utils.NewSixID(),
+		Base:  models.NewBase(),
 		Email: "initial@example.com",
 		EmailChange: &models.EmailChange{
 			NewAddress:      "pending@example.com",

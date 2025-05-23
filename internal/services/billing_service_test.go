@@ -2,37 +2,19 @@ package services
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"greendrake/l1/internal/config"
 	"greendrake/l1/internal/models"
 	"greendrake/l1/internal/utils"
 )
 
-var testMongoURIBilling = ""
-
-func init() {
-	testMongoURIBilling = os.Getenv("MONGO_URI_TEST")
-	if testMongoURIBilling == "" {
-		testMongoURIBilling = "mongodb://localhost:27017"
-	}
-}
-
 func setupTestDBBilling(t *testing.T, dbName string) *mongo.Database {
-	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(testMongoURIBilling))
-	if err != nil {
-		t.Fatalf("Failed to connect to MongoDB: %v", err)
-	}
-	db := client.Database(dbName)
-	_ = db.Collection("invoices").Drop(context.Background())
-	_ = db.Collection("users").Drop(context.Background())
-	return db
+	return utils.SetupTestDB(t, dbName, "invoices", "users")
 }
 
 type mockConfigService struct{}
@@ -89,13 +71,13 @@ func TestBillingService_GenerateInvoice(t *testing.T) {
 type mockListingService struct{}
 
 func (m *mockListingService) CreateListing(ctx context.Context, userID utils.SixID, title, body string, tags []string, locationID int, countryCode, shipping string, askingPrice *models.AskingPrice) (*models.Listing, error) {
-	return &models.Listing{ID: utils.NewSixID(), UserID: userID, Title: title, Body: body, Tags: tags, LocationID: locationID, CountryCode: countryCode, Shipping: shipping, AskingPrice: askingPrice}, nil
+	return &models.Listing{Base: models.NewBase(), UserID: userID, Title: title, Body: body, Tags: tags, LocationID: locationID, CountryCode: countryCode, Shipping: shipping, AskingPrice: askingPrice}, nil
 }
 func (m *mockListingService) FindListingByID(ctx context.Context, listingID utils.SixID) (*models.Listing, error) {
-	return &models.Listing{ID: listingID}, nil
+	return &models.Listing{Base: models.Base{ID: listingID}}, nil
 }
 func (m *mockListingService) UpdateListing(ctx context.Context, listingID, userID utils.SixID, updates map[string]interface{}) (*models.Listing, error) {
-	return &models.Listing{ID: listingID, UserID: userID}, nil
+	return &models.Listing{Base: models.Base{ID: listingID}, UserID: userID}, nil
 }
 func (m *mockListingService) PublishListing(ctx context.Context, listingID, userID utils.SixID) error {
 	return nil
@@ -116,7 +98,7 @@ func (m *mockListingService) AddImageToListing(ctx context.Context, listingID ut
 	return nil
 }
 func (m *mockListingService) FindLatestListingByUserID(ctx context.Context, userID utils.SixID) (*models.Listing, error) {
-	return &models.Listing{ID: utils.NewSixID(), UserID: userID}, nil
+	return &models.Listing{Base: models.NewBase(), UserID: userID}, nil
 }
 func (m *mockListingService) SuspendListing(ctx context.Context, listingID, adminUserID utils.SixID, reason string) error {
 	return nil
@@ -151,7 +133,7 @@ func (m *mockUserService) SetUserCredentials(ctx context.Context, userID utils.S
 	return nil
 }
 func (m *mockUserService) FindByID(ctx context.Context, userID utils.SixID) (*models.User, error) {
-	return &models.User{ID: userID}, nil
+	return &models.User{Base: models.Base{ID: userID}}, nil
 }
 func (m *mockUserService) GetAllActiveUserIDs(ctx context.Context) ([]utils.SixID, error) {
 	return nil, nil

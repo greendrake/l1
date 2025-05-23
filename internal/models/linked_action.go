@@ -21,7 +21,7 @@ const (
 // LinkedAction represents an action that needs to be confirmed, usually via email.
 // The _id of this document is often used as the secret code in the link.
 type LinkedAction struct {
-	ID        utils.SixID      `bson:"_id" json:"id"`
+	Base      `bson:",inline"`
 	UserID    utils.SixID      `bson:"user_id" json:"user_id"`
 	Type      LinkedActionType `bson:"type" json:"type"`
 	CreatedAt time.Time        `bson:"created_at" json:"created_at"`

@@ -4,18 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
-	"strings"
-	"time"
-
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"greendrake/l1/internal/utils"
-
 	"greendrake/l1/internal/auth" // For password hashing
 	"greendrake/l1/internal/db"   // Added for retry mechanism
 	"greendrake/l1/internal/models"
+	"greendrake/l1/internal/utils"
+	"log"
+	"time"
 )
 
 // ErrEmailExists is returned when an attempt is made to use an email that already exists.
@@ -103,51 +100,28 @@ func (s *userService) CreatePhantomUser(ctx context.Context, email string) (*mod
 	}
 
 	now := time.Now().UTC()
-	var newUser *models.User
-	// err is already declared above
 
-	operation := func() error {
-		newUser = &models.User{
-			ID:        utils.NewSixID(), // ID generated on each attempt
-			Email:     email,
-			Phantom:   true,
-			Activated: false,
-			Suspended: false,
-			IsAdmin:   false,
-			Overdue:   false,
-			Deleted:   false,
-			CreatedAt: now,
-			UpdatedAt: now,
-			NotificationPreferences: &models.NotificationPreferences{
-				Enquiry:           true,
-				Offer:             true,
-				UserSuspension:    true,
-				ListingSuspension: true,
-				InvoiceOverdue:    true,
-			},
-		}
-		_, insertErr := collection.InsertOne(ctx, newUser)
-		return insertErr
-	}
+	doc, err := db.InsertOne(ctx, collection, &models.User{
+		Email:     email,
+		Phantom:   true,
+		Activated: false,
+		Suspended: false,
+		IsAdmin:   false,
+		Overdue:   false,
+		Deleted:   false,
+		CreatedAt: now,
+		UpdatedAt: now,
+		NotificationPreferences: &models.NotificationPreferences{
+			Enquiry:           true,
+			Offer:             true,
+			UserSuspension:    true,
+			ListingSuspension: true,
+			InvoiceOverdue:    true,
+		},
+	})
 
-	err = db.Try(operation)
+	return doc.(*models.User), err
 
-	if err != nil {
-		// Check if the error is due to the unique email index constraint
-		// This is a simplistic check; a more robust way would be to inspect the error details further if possible,
-		// or ensure IsMongoDuplicateKeyError can distinguish between _id and other unique index violations.
-		if mongo.IsDuplicateKeyError(err) && strings.Contains(err.Error(), "email_1") { // Assuming default index name for email
-			return nil, ErrEmailExists // Return a more specific error for email collision
-		}
-		userIDStr := "<unknown>"
-		if newUser != nil {
-			userIDStr = newUser.ID.String()
-		}
-		return nil, fmt.Errorf("error inserting new phantom user for %s (last attempted user ID: %s) after multiple retries: %w",
-			email, userIDStr, err)
-	}
-
-	return newUser, nil
 }
 
 // SetUserCredentials updates the user's auth type and secrets (e.g., password hash).

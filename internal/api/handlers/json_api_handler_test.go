@@ -85,8 +85,8 @@ func TestJsonApiHandler_SignInOrUp_NewUser(t *testing.T) {
 	newEmail := "test@example.com"
 	newUserID := utils.NewSixID()
 	mockUserSvc.On("FindByEmail", mock.Anything, newEmail).Return(nil, mongo.ErrNoDocuments)
-	mockUserSvc.On("CreatePhantomUser", mock.Anything, newEmail).Return(&models.User{ID: newUserID, Email: newEmail}, nil)
-	mockLinkedActionSvc.On("CreateLoginToSetupAction", mock.Anything, newUserID).Return(&models.LinkedAction{ID: utils.SixID{}, UserID: newUserID, Type: models.ActionLoginToSetupAccount}, nil)
+	mockUserSvc.On("CreatePhantomUser", mock.Anything, newEmail).Return(&models.User{Base: models.Base{ID: newUserID}, Email: newEmail}, nil)
+	mockLinkedActionSvc.On("CreateLoginToSetupAction", mock.Anything, newUserID).Return(&models.LinkedAction{Base: models.NewBase(), UserID: newUserID, Type: models.ActionLoginToSetupAccount}, nil)
 	mockTaskClient.On("EnqueueContext", mock.Anything, mock.MatchedBy(func(task *asynq.Task) bool {
 		if task.Type() != tasks.TypeEmailDelivery {
 			return false
@@ -128,7 +128,7 @@ func TestJsonApiHandler_Login_Success_PasswordOnly(t *testing.T) {
 	userPassword := "password123"
 	userID := utils.NewSixID()
 	hashedPassword, _ := auth.HashPassword(userPassword)
-	mockUserSvc.On("FindByEmail", mock.Anything, userEmail).Return(&models.User{ID: userID, Email: userEmail, Activated: true, Suspended: false, PasswordHash: hashedPassword, AuthType: models.AuthTypePasswordOnly}, nil)
+	mockUserSvc.On("FindByEmail", mock.Anything, userEmail).Return(&models.User{Base: models.Base{ID: userID}, Email: userEmail, Activated: true, Suspended: false, PasswordHash: hashedPassword, AuthType: models.AuthTypePasswordOnly}, nil)
 	loginArgsStruct := handlers.LoginArgs{Email: userEmail, ChallengeType: "password", Secret: userPassword}
 	argsContainer := []interface{}{loginArgsStruct}
 	argsBytes, _ := json.Marshal(argsContainer)
@@ -176,7 +176,7 @@ func TestJsonApiHandler_Login_Fail_WrongPassword(t *testing.T) {
 	wrongPassword := "wrongpass"
 	userID := utils.NewSixID()
 	hashedPassword, _ := auth.HashPassword(correctPassword)
-	mockUserSvc.On("FindByEmail", mock.Anything, userEmail).Return(&models.User{ID: userID, Email: userEmail, Activated: true, Suspended: false, PasswordHash: hashedPassword, AuthType: models.AuthTypePasswordOnly}, nil)
+	mockUserSvc.On("FindByEmail", mock.Anything, userEmail).Return(&models.User{Base: models.Base{ID: userID}, Email: userEmail, Activated: true, Suspended: false, PasswordHash: hashedPassword, AuthType: models.AuthTypePasswordOnly}, nil)
 
 	loginArgsStruct := handlers.LoginArgs{Email: userEmail, ChallengeType: "password", Secret: wrongPassword}
 	argsContainer := []interface{}{loginArgsStruct}
@@ -277,7 +277,7 @@ func TestJsonApiHandler_SignIn_ActivatedUser_Password(t *testing.T) {
 	router, _ := setupTestRouter(mockUserSvc, mockLinkedActionSvc, mockListingSvc, mockStorageSvc, mockEnquirySvc, mockValidationSvc, mockEmailTemplateSvc, mockTaskClient, nil)
 	userEmail := "activated@example.com"
 	userID := utils.NewSixID()
-	mockUserSvc.On("FindByEmail", mock.Anything, userEmail).Return(&models.User{ID: userID, Email: userEmail, Activated: true, AuthType: models.AuthTypePasswordOnly}, nil)
+	mockUserSvc.On("FindByEmail", mock.Anything, userEmail).Return(&models.User{Base: models.Base{ID: userID}, Email: userEmail, Activated: true, AuthType: models.AuthTypePasswordOnly}, nil)
 	argsJSON := fmt.Sprintf(`["%s"]`, userEmail)
 	reqBody := handlers.JsonApiRequest{Method: "signIn", Arguments: json.RawMessage(argsJSON)}
 	jsonBody, _ := json.Marshal(reqBody)
@@ -307,7 +307,7 @@ func TestJsonApiHandler_SignIn_UnactivatedUser(t *testing.T) {
 	router, _ := setupTestRouter(mockUserSvc, mockLinkedActionSvc, mockListingSvc, mockStorageSvc, mockEnquirySvc, mockValidationSvc, mockEmailTemplateSvc, mockTaskClient, nil)
 	userEmail := "unactivated@example.com"
 	userID := utils.NewSixID()
-	mockUserSvc.On("FindByEmail", mock.Anything, userEmail).Return(&models.User{ID: userID, Email: userEmail, Activated: false}, nil)
+	mockUserSvc.On("FindByEmail", mock.Anything, userEmail).Return(&models.User{Base: models.Base{ID: userID}, Email: userEmail, Activated: false}, nil)
 	argsJSON := fmt.Sprintf(`["%s"]`, userEmail)
 	reqBody := handlers.JsonApiRequest{Method: "signIn", Arguments: json.RawMessage(argsJSON)}
 	jsonBody, _ := json.Marshal(reqBody)
@@ -337,8 +337,8 @@ func TestJsonApiHandler_ResetAccess_Success(t *testing.T) {
 	router, _ := setupTestRouter(mockUserSvc, mockLinkedActionSvc, mockListingSvc, mockStorageSvc, mockEnquirySvc, mockValidationSvc, mockEmailTemplateSvc, mockTaskClient, nil)
 	userEmail := "activated@example.com"
 	userID := utils.NewSixID()
-	mockUserSvc.On("FindByEmail", mock.Anything, userEmail).Return(&models.User{ID: userID, Email: userEmail, Activated: true}, nil)
-	mockLinkedActionSvc.On("CreateResetAccessAction", mock.Anything, userID).Return(&models.LinkedAction{ID: utils.SixID{}, UserID: userID}, nil)
+	mockUserSvc.On("FindByEmail", mock.Anything, userEmail).Return(&models.User{Base: models.Base{ID: userID}, Email: userEmail, Activated: true}, nil)
+	mockLinkedActionSvc.On("CreateResetAccessAction", mock.Anything, userID).Return(&models.LinkedAction{Base: models.NewBase(), UserID: userID}, nil)
 	mockTaskClient.On("EnqueueContext", mock.Anything, mock.AnythingOfType("*asynq.Task"), mock.Anything).Return(&asynq.TaskInfo{}, nil).Run(func(args mock.Arguments) { /* ... */ })
 	argsJSON := fmt.Sprintf(`["%s"]`, userEmail)
 	reqBody := handlers.JsonApiRequest{Method: "resetAccess", Arguments: json.RawMessage(argsJSON)}
@@ -506,7 +506,7 @@ func TestJsonApiHandler_CreateListing_Success(t *testing.T) {
 	isAdmin := false
 	token, _ := auth.GenerateJWT(userID, isAdmin, cfg.JwtSecret, cfg.JwtTTL)
 	createArgsStruct := handlers.CreateListingArgs{Title: "Test Listing", Body: "Test Body", Tags: []string{"test", "go"}, LocationID: locationID, CountryCode: "US", Shipping: "pickup_only", AskingPrice: &models.AskingPrice{Value: 10.99, CurrencyCode: "USD"}}
-	expectedListing := &models.Listing{ID: listingID, UserID: userID, Title: createArgsStruct.Title, Body: createArgsStruct.Body, Tags: createArgsStruct.Tags, LocationID: locationID, CountryCode: createArgsStruct.CountryCode, Shipping: createArgsStruct.Shipping, AskingPrice: createArgsStruct.AskingPrice, IsDraft: true}
+	expectedListing := &models.Listing{Base: models.Base{ID: listingID}, UserID: userID, Title: createArgsStruct.Title, Body: createArgsStruct.Body, Tags: createArgsStruct.Tags, LocationID: locationID, CountryCode: createArgsStruct.CountryCode, Shipping: createArgsStruct.Shipping, AskingPrice: createArgsStruct.AskingPrice, IsDraft: true}
 	mockListingSvc.On("CreateListing", mock.Anything, userID, createArgsStruct.Title, createArgsStruct.Body, createArgsStruct.Tags, locationID, createArgsStruct.CountryCode, createArgsStruct.Shipping, createArgsStruct.AskingPrice).Return(expectedListing, nil)
 	argsContainer := []interface{}{createArgsStruct}
 	argsBytes, _ := json.Marshal(argsContainer)
@@ -547,7 +547,7 @@ func TestJsonApiHandler_UpdateListing_Success(t *testing.T) {
 	listingID := utils.NewSixID()
 	token, _ := auth.GenerateJWT(userID, false, cfg.JwtSecret, cfg.JwtTTL)
 	updates := map[string]interface{}{"title": "Updated Title", "body": "Updated Body"}
-	expectedListing := &models.Listing{ID: listingID, UserID: userID, Title: "Updated Title", Body: "Updated Body"}
+	expectedListing := &models.Listing{Base: models.Base{ID: listingID}, UserID: userID, Title: "Updated Title", Body: "Updated Body"}
 	mockListingSvc.On("UpdateListing", mock.Anything, listingID, userID, updates).Return(expectedListing, nil)
 	updateArgsStruct := handlers.UpdateListingArgs{ListingID: listingID.String(), Updates: updates}
 	argsContainer := []interface{}{updateArgsStruct}
@@ -765,11 +765,11 @@ func TestJsonApiHandler_SendEnquiry_Guest_Success(t *testing.T) {
 	enquiryArgs := handlers.SendEnquiryArgs{ListingID: listingID.String(), UserEmail: "guest@example.com", Message: "Is this available?", Offer: nil}
 
 	// Expect FindListingByID call
-	mockListingSvc.On("FindListingByID", mock.Anything, listingID).Return(&models.Listing{ID: listingID, UserID: ownerID}, nil)
+	mockListingSvc.On("FindListingByID", mock.Anything, listingID).Return(&models.Listing{Base: models.Base{ID: listingID}, UserID: ownerID}, nil)
 	// Expect CreateEnquiry call
-	mockEnquirySvc.On("CreateEnquiry", mock.Anything, listingID, (*utils.SixID)(nil), enquiryArgs.UserEmail, enquiryArgs.Message, enquiryArgs.Offer).Return(&models.ListingEnquiry{ID: enquiryID}, nil)
+	mockEnquirySvc.On("CreateEnquiry", mock.Anything, listingID, (*utils.SixID)(nil), enquiryArgs.UserEmail, enquiryArgs.Message, enquiryArgs.Offer).Return(&models.ListingEnquiry{Base: models.Base{ID: enquiryID}}, nil)
 	// Expect FindByID for owner (even for guest enquiry)
-	mockUserSvc.On("FindByID", mock.Anything, ownerID).Return(&models.User{ID: ownerID, Email: "owner@example.com", NotificationPreferences: &models.NotificationPreferences{Enquiry: true, Offer: true}}, nil)
+	mockUserSvc.On("FindByID", mock.Anything, ownerID).Return(&models.User{Base: models.Base{ID: ownerID}, Email: "owner@example.com", NotificationPreferences: &models.NotificationPreferences{Enquiry: true, Offer: true}}, nil)
 	// Expect email task enqueue
 	mockTaskClient.On("EnqueueContext", mock.Anything, mock.AnythingOfType("*asynq.Task"), mock.Anything).Return(&asynq.TaskInfo{}, nil)
 
@@ -815,11 +815,11 @@ func TestJsonApiHandler_SendEnquiry_Authenticated_Success(t *testing.T) {
 	enquiryArgs := handlers.SendEnquiryArgs{ListingID: listingID.String(), UserEmail: "authuser@example.com", Message: "", Offer: &models.AskingPrice{Value: 50, CurrencyCode: "CAD"}}
 
 	// Expect FindListingByID call
-	mockListingSvc.On("FindListingByID", mock.Anything, listingID).Return(&models.Listing{ID: listingID, UserID: ownerID, Title: "Test"}, nil)
+	mockListingSvc.On("FindListingByID", mock.Anything, listingID).Return(&models.Listing{Base: models.Base{ID: listingID}, UserID: ownerID, Title: "Test"}, nil)
 	// Expect CreateEnquiry call
-	mockEnquirySvc.On("CreateEnquiry", mock.Anything, listingID, &userID, enquiryArgs.UserEmail, enquiryArgs.Message, enquiryArgs.Offer).Return(&models.ListingEnquiry{ID: enquiryID}, nil)
+	mockEnquirySvc.On("CreateEnquiry", mock.Anything, listingID, &userID, enquiryArgs.UserEmail, enquiryArgs.Message, enquiryArgs.Offer).Return(&models.ListingEnquiry{Base: models.Base{ID: enquiryID}}, nil)
 	// Expect FindByID for owner
-	mockUserSvc.On("FindByID", mock.Anything, ownerID).Return(&models.User{ID: ownerID, Email: "owner@example.com", NotificationPreferences: &models.NotificationPreferences{Enquiry: true, Offer: true}}, nil)
+	mockUserSvc.On("FindByID", mock.Anything, ownerID).Return(&models.User{Base: models.Base{ID: ownerID}, Email: "owner@example.com", NotificationPreferences: &models.NotificationPreferences{Enquiry: true, Offer: true}}, nil)
 	// Expect task enqueue
 	mockTaskClient.On("EnqueueContext", mock.Anything, mock.AnythingOfType("*asynq.Task"), mock.Anything).Return(&asynq.TaskInfo{}, nil)
 
@@ -855,7 +855,7 @@ func TestJsonApiHandler_ListValidationTypes_Success(t *testing.T) {
 	router, cfg := setupTestRouter(mockUserSvc, mockLinkedActionSvc, mockListingSvc, mockStorageSvc, mockEnquirySvc, mockValidationSvc, mockEmailTemplateSvc, mockTaskClient, nil)
 	userID := utils.NewSixID()
 	token, _ := auth.GenerateJWT(userID, false, cfg.JwtSecret, cfg.JwtTTL)
-	expectedTypes := []models.UserValidationType{{ID: utils.NewSixID(), Key: "Domain Ownership", Type: models.ValidationTypeDomainOwnership}, {ID: utils.NewSixID(), Key: "Some Profile", Type: models.ValidationTypeOnlineProfile}}
+	expectedTypes := []models.UserValidationType{{Base: models.NewBase(), Key: "Domain Ownership", Type: models.ValidationTypeDomainOwnership}, {Base: models.NewBase(), Key: "Some Profile", Type: models.ValidationTypeOnlineProfile}}
 	mockValidationSvc.On("GetValidationTypes", mock.Anything).Return(expectedTypes, nil)
 	reqBody := handlers.JsonApiRequest{Method: "listValidationTypes"}
 	jsonBody, _ := json.Marshal(reqBody)
@@ -896,7 +896,7 @@ func TestJsonApiHandler_StartDomainValidation_Success(t *testing.T) {
 	token, _ := auth.GenerateJWT(userID, false, cfg.JwtSecret, cfg.JwtTTL)
 	domain := "example.com"
 	valueToProve := fmt.Sprintf("%s:ACCOUNT_VALIDATION:%s", cfg.AppName, validationID.String())
-	expectedValidation := &models.UserValidation{ID: validationID, UserID: userID, TypeID: typeID, Data: map[string]interface{}{"domain_name": domain}, ValueToProve: valueToProve}
+	expectedValidation := &models.UserValidation{Base: models.Base{ID: validationID}, UserID: userID, TypeID: typeID, Data: map[string]interface{}{"domain_name": domain}, ValueToProve: valueToProve}
 	mockValidationSvc.On("CreateDomainValidation", mock.Anything, userID, typeID, domain).Return(expectedValidation, nil)
 	startArgs := handlers.StartDomainValidationArgs{TypeID: typeID.String(), DomainName: domain}
 	argsContainer := []interface{}{startArgs}
@@ -941,7 +941,7 @@ func TestJsonApiHandler_StartOnlineProfileValidation_Success(t *testing.T) {
 	instructions := "Put this value on your profile page."
 
 	expectedValidation := &models.UserValidation{
-		ID:             validationID,
+		Base:           models.Base{ID: validationID},
 		UserID:         userID,
 		TypeID:         typeID,
 		ValidationType: models.ValidationTypeOnlineProfile,
@@ -950,7 +950,7 @@ func TestJsonApiHandler_StartOnlineProfileValidation_Success(t *testing.T) {
 	}
 	mockValidationSvc.On("CreateOnlineProfileValidation", mock.Anything, userID, typeID, profileID).Return(expectedValidation, nil)
 	mockValidationSvc.On("GetValidationTypeByID", mock.Anything, typeID).Return(&models.UserValidationType{
-		ID:     typeID,
+		Base:   models.Base{ID: typeID},
 		Type:   models.ValidationTypeOnlineProfile,
 		Config: map[string]interface{}{"user_instructions": instructions},
 	}, nil)
@@ -1118,7 +1118,7 @@ func TestJsonApiHandler_ChangePassword_Success(t *testing.T) {
 
 	// Mock user service expectations
 	mockUserSvc.On("FindByID", mock.Anything, userID).Return(&models.User{
-		ID:           userID,
+		Base:         models.Base{ID: userID},
 		Email:        "test@example.com",
 		PasswordHash: hashedCurrentPassword,
 		AuthType:     models.AuthTypePasswordOnly,
@@ -1176,7 +1176,7 @@ func TestJsonApiHandler_ChangePassword_WrongCurrentPassword(t *testing.T) {
 
 	// Mock user service expectations
 	mockUserSvc.On("FindByID", mock.Anything, userID).Return(&models.User{
-		ID:           userID,
+		Base:         models.Base{ID: userID},
 		Email:        "test@example.com",
 		PasswordHash: hashedCurrentPassword,
 		AuthType:     models.AuthTypePasswordOnly,
@@ -1230,7 +1230,7 @@ func TestJsonApiHandler_ChangePassword_NoPasswordAuth(t *testing.T) {
 
 	// Mock user service expectations
 	mockUserSvc.On("FindByID", mock.Anything, userID).Return(&models.User{
-		ID:       userID,
+		Base:     models.Base{ID: userID},
 		Email:    "test@example.com",
 		AuthType: models.AuthTypeEmailLoginCodeOnly, // User does not have password auth
 	}, nil)

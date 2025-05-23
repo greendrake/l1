@@ -4,15 +4,18 @@ import (
 	// "fmt"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"math/big"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"regexp"
+	"strings"
 
 	// "strconv"
 	"syscall"
@@ -26,7 +29,6 @@ import (
 	"github.com/joho/godotenv"
 
 	"greendrake/l1/internal/models" // Import models
-	"greendrake/l1/internal/utils"  // Import utils for SixID
 
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -34,23 +36,53 @@ import (
 
 const (
 	testAppBinary         = "./l1_test_app" // Name for the test binary
-	testAppPort           = "8089"                  // Port for the test server
-	testServiceApiPortApi = "8091"                  // Port for Service API run by API process
-	testServiceApiPortBg  = "8092"                  // Port for Service API run by BG process (if any)
+	testAppPort           = "8089"          // Port for the test server
+	testServiceApiPortApi = "8091"          // Port for Service API run by API process
+	testServiceApiPortBg  = "8092"          // Port for Service API run by BG process (if any)
 	testAppURL            = "http://localhost:" + testAppPort
 	testServiceApiURL     = "http://localhost:" + testServiceApiPortApi // Use API process's service port
 	startupTimeout        = 15 * time.Second                            // Slightly increased timeout
 	pingEndpoint          = testAppURL + "/v1/ping"
 )
 
+// Global variable to store the random test database name
+var testDbName string
+
+// generateRandomDbName creates a random database name for testing
+func generateRandomDbName() string {
+	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+	const nameLength = 12
+
+	var result strings.Builder
+	result.WriteString("test_")
+
+	for i := 0; i < nameLength; i++ {
+		randomIndex, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+		if err != nil {
+			// Fallback to time-based name if crypto/rand fails
+			return fmt.Sprintf("test_%d", time.Now().UnixNano())
+		}
+		result.WriteByte(charset[randomIndex.Int64()])
+	}
+
+	return result.String()
+}
+
 // TestMain manages the setup and teardown of the integration test environment.
 func TestMain(m *testing.M) {
+	// Generate random database name for this test run
+	testDbName = generateRandomDbName()
+	log.Printf("Integration Test Setup: Using test database: %s", testDbName)
+
 	// Defer cleanup actions to ensure they run even if setup fails
 	defer func() {
 		log.Println("Integration Test Teardown: Cleaning up test binary...")
 		// Attempt to remove the binary, ignore error if it doesn't exist
 		_ = os.Remove(testAppBinary)
 	}()
+
+	// Defer database cleanup - this should run before the binary cleanup
+	defer dropTestDatabase()
 
 	log.Println("Integration Test Setup: Building application...")
 	godotenv.Load()
@@ -78,6 +110,7 @@ func TestMain(m *testing.M) {
 	apiCmd.Env = append(os.Environ(),
 		"API_PORT="+testAppPort,
 		"SERVICE_API_PORT="+testServiceApiPortApi, // Use specific port
+		"MONGO_DB_NAME="+testDbName,               // Use random test database name
 		"JWT_SECRET=integration-test-secret",
 		"GIN_MODE=release",
 		"MOCK_SERVICES=true",
@@ -103,6 +136,7 @@ func TestMain(m *testing.M) {
 	bgCmd := exec.Command(testAppBinary, "-m", "bg") // Run in background mode
 	bgCmd.Env = append(os.Environ(),
 		"SERVICE_API_PORT="+testServiceApiPortBg,
+		"MONGO_DB_NAME="+testDbName,          // Use random test database name
 		"JWT_SECRET=integration-test-secret", // Needs JWT secret for potential internal calls?
 		"GIN_MODE=release",                   // Keep logs clean
 		"MOCK_SERVICES=true",                 // Essential for Redis email
@@ -774,7 +808,6 @@ func seedTestData() error {
 	defer cancel()
 
 	mongoURI := os.Getenv("MONGO_URI")
-	dbName := os.Getenv("MONGO_DB_NAME")
 
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
 	if err != nil {
@@ -786,41 +819,41 @@ func seedTestData() error {
 		}
 	}()
 
-	db := client.Database(dbName)
+	db := client.Database(testDbName)
 	templateCollection := db.Collection("email_templates")
 
 	// Use the default templates from the email template service
 	templatesToSeed := []models.EmailTemplate{
 		{
-			ID:         utils.NewSixID(),
+			Base:       models.NewBase(),
 			TemplateID: "activate_account",
 			Locale:     "en-US",
 			Subject:    "Activate your L1 Account",
 			Body:       "Welcome! Please click here to activate: /la/{{.action_id}}",
 		},
 		{
-			ID:         utils.NewSixID(),
+			Base:       models.NewBase(),
 			TemplateID: "email_change_approve",
 			Locale:     "en-US",
 			Subject:    "Approve Email Change Request",
 			Body:       "Request to change email. Please click to approve from old address: /la/{{.action_id}}",
 		},
 		{
-			ID:         utils.NewSixID(),
+			Base:       models.NewBase(),
 			TemplateID: "email_change_confirm",
 			Locale:     "en-US",
 			Subject:    "Confirm New Email Address",
 			Body:       "Please click here to confirm your new email address: /la/{{.action_id}}",
 		},
 		{
-			ID:         utils.NewSixID(),
+			Base:       models.NewBase(),
 			TemplateID: "email_login_code",
 			Locale:     "en-US",
 			Subject:    "Your L1 Login Code",
 			Body:       "Here is your login code: {{.action_id}}. It will expire shortly. Alternatively, click /la/{{.action_id}}",
 		},
 		{
-			ID:         utils.NewSixID(),
+			Base:       models.NewBase(),
 			TemplateID: "confirm_account_deletion",
 			Locale:     "en-US",
 			Subject:    "Confirm Account Deletion",
@@ -909,7 +942,6 @@ func cleanupTestData() {
 	defer cancel()
 
 	mongoURI := os.Getenv("MONGO_URI")
-	dbName := os.Getenv("MONGO_DB_NAME")
 
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
 	if err != nil {
@@ -922,7 +954,7 @@ func cleanupTestData() {
 		}
 	}()
 
-	db := client.Database(dbName)
+	db := client.Database(testDbName)
 	templateCollection := db.Collection("email_templates")
 
 	// Delete the seeded templates
@@ -947,6 +979,37 @@ func cleanupTestData() {
 	}
 
 	log.Println("Finished cleaning up seeded data.")
+}
+
+// dropTestDatabase drops the entire test database
+func dropTestDatabase() {
+	log.Printf("Dropping test database: %s", testDbName)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	mongoURI := os.Getenv("MONGO_URI")
+	if mongoURI == "" {
+		log.Println("MONGO_URI not set, skipping database drop")
+		return
+	}
+
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
+	if err != nil {
+		log.Printf("Failed to connect to MongoDB for database drop: %v", err)
+		return
+	}
+	defer func() {
+		if err := client.Disconnect(ctx); err != nil {
+			log.Printf("Error disconnecting database drop client: %v", err)
+		}
+	}()
+
+	err = client.Database(testDbName).Drop(ctx)
+	if err != nil {
+		log.Printf("Failed to drop test database '%s': %v", testDbName, err)
+	} else {
+		log.Printf("Successfully dropped test database: %s", testDbName)
+	}
 }
 
 // --- Service API Helper ---

@@ -30,7 +30,7 @@ func TestRestUserHandler_GetUserByID_Success(t *testing.T) {
 
 	userID := utils.NewSixID()
 	expectedUser := &models.User{
-		ID:        userID,
+		Base:      models.Base{ID: userID},
 		Name:      "Test User",
 		CreatedAt: time.Now().Add(-24 * time.Hour), // Joined yesterday
 	}

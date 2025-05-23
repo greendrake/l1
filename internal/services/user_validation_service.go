@@ -4,15 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
-	"time"
-
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"greendrake/l1/internal/config"
 	"greendrake/l1/internal/db"
 	"greendrake/l1/internal/models"
 	"greendrake/l1/internal/utils"
+	"strings"
+	"time"
 )
 
 // IUserValidationService defines the interface for user validation operations.
@@ -105,54 +104,24 @@ func (s *userValidationService) CreateDomainValidation(ctx context.Context, user
 	}
 	// TODO: Validate domainName format?
 
-	// 2. Create the validation document
-	collection := s.db.Collection(validationsCollection)
 	now := time.Now().UTC()
 
-	var newValidation *models.UserValidation
-	// err is already declared above
+	doc, err := db.InsertOne(ctx, s.db.Collection(validationsCollection), &models.UserValidation{
+		UserID:         userID,
+		TypeID:         typeID,
+		ValidationType: valType.Type, // Denormalize
+		Data: map[string]interface{}{
+			"domain_name": domainName,
+		},
+		ValueToProve: "",
+		ConfirmedAt:  nil,
+		RevokedAt:    nil,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		Deleted:      false,
+	})
 
-	operation := func() error {
-		validationID := utils.NewSixID() // ID generated on each attempt
-		valueToProve := fmt.Sprintf("%s:ACCOUNT_VALIDATION:%s", s.cfg.AppName, validationID.String())
-		newValidation = &models.UserValidation{
-			ID:             validationID,
-			UserID:         userID,
-			TypeID:         typeID,
-			ValidationType: valType.Type, // Denormalize
-			Data: map[string]interface{}{
-				"domain_name": domainName,
-			},
-			ValueToProve: valueToProve, // Store this temporarily?
-			ConfirmedAt:  nil,
-			RevokedAt:    nil,
-			CreatedAt:    now,
-			UpdatedAt:    now,
-			Deleted:      false,
-		}
-		_, insertErr := collection.InsertOne(ctx, newValidation)
-		return insertErr
-	}
-
-	err = db.Try(operation)
-
-	if err != nil {
-		validationIDStr := "<unknown>"
-		if newValidation != nil {
-			validationIDStr = newValidation.ID.String()
-		}
-		return nil, fmt.Errorf("failed to insert domain validation for user %s, domain %s (last attempted validation ID: %s) after multiple retries: %w",
-			userID.String(), domainName, validationIDStr, err)
-	}
-
-	// 3. Enqueue the background check task (need task service integration)
-	// taskPayload := tasks.UserValidationCheckPayload{ValidationID: validationID.String()}
-	// task := asynq.NewTask(tasks.TypeUserValidationCheck, taskPayload, asynq.ProcessIn(checkDelay))
-	// _, err = taskClient.Enqueue(task)
-	fmt.Printf("[TODO] Domain validation %s created. Need to enqueue check task.", newValidation.ID.String()) // Use newValidation.ID here
-
-	// Return the created validation object (ValueToProve might be useful for the user)
-	return newValidation, nil
+	return doc.(*models.UserValidation), err
 }
 
 // CreateOnlineProfileValidation creates a pending online profile validation entry.
@@ -167,56 +136,29 @@ func (s *userValidationService) CreateOnlineProfileValidation(ctx context.Contex
 	}
 	// TODO: Validate profileID based on type's config/schema?
 
-	// 2. Create the validation document
-	collection := s.db.Collection(validationsCollection)
 	now := time.Now().UTC()
 
-	var newValidation *models.UserValidation
-	// err is already declared above
+	// Build profile URL from template (example only, needs safe template execution)
+	urlTemplate, _ := valType.Config["url_template"].(string)
+	profileURL := strings.Replace(urlTemplate, "{profile_id}", profileID, -1)
 
-	operation := func() error {
-		validationID := utils.NewSixID() // ID generated on each attempt
-		valueToProve := fmt.Sprintf("%s:ACCOUNT_VALIDATION:%s", s.cfg.AppName, validationID.String())
+	doc, err := db.InsertOne(ctx, s.db.Collection(validationsCollection), &models.UserValidation{
+		UserID:         userID,
+		TypeID:         typeID,
+		ValidationType: valType.Type,
+		Data: map[string]interface{}{
+			"profile_id":  profileID,  // Store the ID used
+			"profile_url": profileURL, // Store the derived URL
+		},
+		ValueToProve: "",
+		ConfirmedAt:  nil,
+		RevokedAt:    nil,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		Deleted:      false,
+	})
 
-		// Build profile URL from template (example only, needs safe template execution)
-		urlTemplate, _ := valType.Config["url_template"].(string)
-		profileURL := strings.Replace(urlTemplate, "{profile_id}", profileID, -1)
-
-		newValidation = &models.UserValidation{
-			ID:             validationID,
-			UserID:         userID,
-			TypeID:         typeID,
-			ValidationType: valType.Type,
-			Data: map[string]interface{}{
-				"profile_id":  profileID,  // Store the ID used
-				"profile_url": profileURL, // Store the derived URL
-			},
-			ValueToProve: valueToProve,
-			ConfirmedAt:  nil,
-			RevokedAt:    nil,
-			CreatedAt:    now,
-			UpdatedAt:    now,
-			Deleted:      false,
-		}
-		_, insertErr := collection.InsertOne(ctx, newValidation)
-		return insertErr
-	}
-
-	err = db.Try(operation)
-
-	if err != nil {
-		validationIDStr := "<unknown>"
-		if newValidation != nil {
-			validationIDStr = newValidation.ID.String()
-		}
-		return nil, fmt.Errorf("failed to insert online profile validation for user %s, profile %s (last attempted validation ID: %s) after multiple retries: %w",
-			userID.String(), profileID, validationIDStr, err)
-	}
-
-	// 3. Enqueue background check task
-	fmt.Printf("[TODO] Online profile validation %s created. Need to enqueue check task.", newValidation.ID.String()) // Use newValidation.ID here
-
-	return newValidation, nil
+	return doc.(*models.UserValidation), err
 }
 
 // ConfirmValidation marks a validation as confirmed by setting ConfirmedAt.

@@ -2,10 +2,10 @@ package config
 
 import (
 	"fmt"
+	"github.com/joho/godotenv"
 	"os"
 	"strconv"
 	"time"
-	"github.com/joho/godotenv"
 )
 
 // Config holds all configuration for the application.

@@ -179,45 +179,22 @@ func (s *billingService) GenerateInvoice(ctx context.Context, userID utils.SixID
 	// TODO: Generate unique invoice number
 	invoiceNumber := fmt.Sprintf("INV-%s-%d", userID.String()[len(userID.String())-4:], now.Unix())
 
-	var newInvoice *models.Invoice
-	var err error
-	collection := s.db.Collection(invoicesCollection)
-
-	operation := func() error {
-		newInvoice = &models.Invoice{
-			ID:              utils.NewSixID(), // ID generated on each attempt
-			UserID:          userID,
-			InvoiceNumber:   invoiceNumber, // Invoice number can remain the same for retries, or be regenerated too if needed
-			Items:           items,
-			CurrencyCode:    currencyCode,
-			Subtotal:        subtotal,
-			Tax:             tax,
-			Total:           total,
-			IssuedAt:        now,
-			DueAt:           dueAt,
-			Sent:            false,
-			PaidAt:          nil,
-			OverdueNotified: false,
-			Deleted:         false,
-		}
-		_, insertErr := collection.InsertOne(ctx, newInvoice)
-		return insertErr
-	}
-
-	err = db.Try(operation) // Use default retries for duplicate key
-
-	if err != nil {
-		invoiceIDStr := "<unknown>"
-		if newInvoice != nil {
-			invoiceIDStr = newInvoice.ID.String()
-		}
-		return nil, fmt.Errorf("failed to insert invoice for user %s (last attempted invoice ID: %s) after multiple retries: %w",
-			userID.String(), invoiceIDStr, err)
-	}
-
-	// TODO: Enqueue task to send invoice email
-
-	return newInvoice, nil
+	doc, err := db.InsertOne(ctx, s.db.Collection(invoicesCollection), &models.Invoice{
+		UserID:          userID,
+		InvoiceNumber:   invoiceNumber, // Invoice number can remain the same for retries, or be regenerated too if needed
+		Items:           items,
+		CurrencyCode:    currencyCode,
+		Subtotal:        subtotal,
+		Tax:             tax,
+		Total:           total,
+		IssuedAt:        now,
+		DueAt:           dueAt,
+		Sent:            false,
+		PaidAt:          nil,
+		OverdueNotified: false,
+		Deleted:         false,
+	})
+	return doc.(*models.Invoice), err
 }
 
 // FindOverdueInvoices retrieves all invoices that are past their due date and not yet paid.

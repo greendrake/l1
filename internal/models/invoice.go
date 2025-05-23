@@ -17,7 +17,7 @@ type InvoiceLineItem struct {
 
 // Invoice represents a bill issued to a user.
 type Invoice struct {
-	ID              utils.SixID       `bson:"_id,omitempty" json:"id,omitempty"`
+	Base            `bson:",inline"`
 	UserID          utils.SixID       `bson:"user_id" json:"user_id"`
 	InvoiceNumber   string            `bson:"invoice_number" json:"invoice_number"` // Generate a unique readable number
 	Items           []InvoiceLineItem `bson:"items" json:"items"`

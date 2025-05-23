@@ -14,7 +14,7 @@ type AskingPrice struct {
 
 // Listing represents a classified listing.
 type Listing struct {
-	ID           utils.SixID  `bson:"_id,omitempty" json:"id,omitempty"`
+	Base         `bson:",inline"`
 	UserID       utils.SixID  `bson:"user_id" json:"user_id"`
 	Title        string       `bson:"title" json:"title"`
 	Body         string       `bson:"body" json:"body"`
@@ -36,7 +36,7 @@ type Listing struct {
 
 // ListingSuspension represents a suspension record for a listing.
 type ListingSuspension struct {
-	ID         utils.SixID `bson:"_id,omitempty" json:"id,omitempty"`
+	Base       `bson:",inline"`
 	ListingID  utils.SixID `bson:"listing_id" json:"listing_id"`
 	UserID     utils.SixID `bson:"user_id" json:"user_id"` // Who reported/requested
 	Reason     string      `bson:"reason" json:"reason"`

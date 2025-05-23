@@ -55,40 +55,18 @@ func (s *linkedActionService) CreateResetAccessAction(ctx context.Context, userI
 
 // createAction is a helper to create different types of linked actions.
 func (s *linkedActionService) createAction(ctx context.Context, userID utils.SixID, actionType models.LinkedActionType, ttl time.Duration, data map[string]interface{}) (*models.LinkedAction, error) {
-	collection := s.db.Collection(linkedActionsCollection)
 	now := time.Now().UTC()
 	expiresAt := now.Add(ttl)
-
-	var action *models.LinkedAction
-	var err error
-
-	operation := func() error {
-		action = &models.LinkedAction{
-			ID:        utils.NewSixID(),
-			UserID:    userID,
-			Type:      actionType,
-			Data:      data,
-			CreatedAt: now,
-			ExpiresAt: expiresAt,
-			Executed:  nil,
-			Deleted:   false,
-		}
-		_, insertErr := collection.InsertOne(ctx, action)
-		return insertErr
-	}
-
-	err = db.Try(operation)
-
-	if err != nil {
-		actionIDStr := "<unknown>"
-		if action != nil {
-			actionIDStr = action.ID.String()
-		}
-		return nil, fmt.Errorf("failed to insert action type %s for user %s (last attempted action ID: %s) after multiple retries: %w",
-			actionType, userID.String(), actionIDStr, err)
-	}
-
-	return action, nil
+	doc, err := db.InsertOne(ctx, s.db.Collection(linkedActionsCollection), &models.LinkedAction{
+		UserID:    userID,
+		Type:      actionType,
+		Data:      data,
+		CreatedAt: now,
+		ExpiresAt: expiresAt,
+		Executed:  nil,
+		Deleted:   false,
+	})
+	return doc.(*models.LinkedAction), err
 }
 
 // FindAndValidateAction finds and validates a linked action by ID.

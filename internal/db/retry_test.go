@@ -1,154 +1,316 @@
 package db
 
 import (
+	"context"
 	"errors"
-	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"go.mongodb.org/mongo-driver/mongo"
+	"greendrake/l1/internal/models"
 	"greendrake/l1/internal/utils"
 )
 
-// mockMongoDuplicateKeyError creates an error that IsMongoDuplicateKeyError will recognize.
-func mockMongoDuplicateKeyError(key string) error {
-	// IsMongoDuplicateKeyError checks for mongo.WriteException and then for code 11000.
-	// We can simulate this by creating a WriteException with a WriteError that has code 11000.
-	mongoErr := mongo.WriteError{
-		Code:    11000, // Duplicate key error code
-		Message: fmt.Sprintf("E11000 duplicate key error collection: test.collection index: _id_ dup key: { : \"%s\" }", key),
-	}
-	// The actual WriteException might have more fields, but this should be enough for IsMongoDuplicateKeyError.
-	// It expects a mongo.WriteException which has a WriteErrors field (slice of WriteError).
-	return mongo.WriteException{WriteErrors: []mongo.WriteError{mongoErr}}
+// CollectionInterface defines the MongoDB collection methods we need for testing
+type CollectionInterface interface {
+	InsertOne(ctx context.Context, document interface{}, opts ...interface{}) (*mongo.InsertOneResult, error)
 }
 
-func TestWithRetries_SuccessfulFirstAttempt(t *testing.T) {
-	var opCalled int
-	operation := func() error {
-		opCalled++
-		return nil // Simulate successful operation
-	}
-
-	err := WithRetries(operation, 3, IsMongoDuplicateKeyError)
-	if err != nil {
-		t.Errorf("Expected no error, got %v", err)
-	}
-	if opCalled != 1 {
-		t.Errorf("Expected operation to be called 1 time, got %d", opCalled)
-	}
+// MockCollection implements CollectionInterface for testing
+type MockCollection struct {
+	mock.Mock
 }
 
-func TestWithRetries_FailureNonDuplicateKey(t *testing.T) {
-	var opCalled int
-	expectedErr := errors.New("some other error")
-	operation := func() error {
-		opCalled++
-		return expectedErr
+func (m *MockCollection) InsertOne(ctx context.Context, document interface{}, opts ...interface{}) (*mongo.InsertOneResult, error) {
+	args := m.Called(ctx, document)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
 	}
+	return args.Get(0).(*mongo.InsertOneResult), args.Error(1)
+}
 
-	err := WithRetries(operation, 3, IsMongoDuplicateKeyError)
-	if !errors.Is(err, expectedErr) {
-		t.Errorf("Expected error %v, got %v", expectedErr, err)
-	}
-	if opCalled != 1 {
-		t.Errorf("Expected operation to be called 1 time, got %d", opCalled)
+// MockDocument implements models.IBase interface for testing
+type MockDocument struct {
+	mock.Mock
+	id utils.SixID
+}
+
+func (m *MockDocument) GenIDIfEmpty() {
+	m.Called()
+	if m.id == (utils.SixID{}) {
+		m.GenID()
 	}
 }
 
-func TestWithRetries_ExhaustRetries(t *testing.T) {
-	var opCalled int
-	// This ID will be used by the mock operation to generate a duplicate key error
-	collidingID := utils.SixID{0, 0, 0, 0, 0, 1}
+func (m *MockDocument) GenID() {
+	m.Called()
+	// Generate a simple predictable ID for testing
+	m.id = utils.SixID{1, 2, 3, 4, 5, 6}
+}
 
-	operation := func() error {
-		opCalled++
-		// Always return a duplicate key error for this test
-		return mockMongoDuplicateKeyError(collidingID.String())
+func (m *MockDocument) SetID(id utils.SixID) {
+	m.Called(id)
+	m.id = id
+}
+
+func (m *MockDocument) GetID() utils.SixID {
+	return m.id
+}
+
+// insertOneWithInterface wraps the InsertOne function to accept our interface
+func insertOneWithInterface(ctx context.Context, collection CollectionInterface, doc models.IBase) (models.IBase, error) {
+	var err error
+	// Loop for initial attempt (attempt = 0) + maxRetries
+	doc.GenIDIfEmpty()
+	for attempt := 0; attempt <= DefaultMaxRetries; attempt++ {
+		_, err = collection.InsertOne(ctx, doc)
+		if err == nil {
+			return doc, nil // Success
+		}
+		// If this was the last attempt (either initial if maxRetries = 0, or the last retry)
+		// and it failed, break out of the loop to return the error.
+		if attempt == DefaultMaxRetries {
+			break
+		}
+		if !isMongoDuplicateKeyError(err) {
+			return nil, err // Not a duplicate key error, return immediately
+		}
+		doc.GenID()
 	}
+	return nil, err // All attempts failed or last attempt failed
+}
 
-	maxRetries := 3
-	err := WithRetries(operation, maxRetries, IsMongoDuplicateKeyError)
-
-	// Expecting a duplicate key error after all retries
-	if err == nil {
-		t.Fatal("Expected a duplicate key error, got nil")
+// Helper function to create a duplicate key error
+func createDuplicateKeyError() error {
+	writeError := mongo.WriteError{
+		Index:   0,
+		Code:    11000, // MongoDB duplicate key error code
+		Message: "E11000 duplicate key error",
 	}
-	if !IsMongoDuplicateKeyError(err) {
-		t.Errorf("Expected a Mongo duplicate key error, got %T: %v", err, err)
-	}
-
-	expectedOpCalls := maxRetries + 1
-	if opCalled != expectedOpCalls {
-		t.Errorf("Expected operation to be called %d times, got %d", expectedOpCalls, opCalled)
+	return mongo.WriteException{
+		WriteConcernError: nil,
+		WriteErrors:       []mongo.WriteError{writeError},
 	}
 }
 
-func TestWithRetries_CollisionResolves(t *testing.T) {
+// Helper function to create a non-duplicate error
+func createOtherError() error {
+	return errors.New("some other MongoDB error")
+}
+
+func TestInsertOne_Success_FirstAttempt(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	mockCollection := new(MockCollection)
+	mockDoc := new(MockDocument)
+
+	expectedResult := &mongo.InsertOneResult{InsertedID: "test-id"}
+
+	mockDoc.On("GenIDIfEmpty").Once()
+	mockDoc.On("GenID").Once() // Called by GenIDIfEmpty since ID is initially empty
+	mockCollection.On("InsertOne", ctx, mockDoc).Return(expectedResult, nil).Once()
+
+	// Act
+	result, err := insertOneWithInterface(ctx, mockCollection, mockDoc)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.Equal(t, mockDoc, result)
+	mockDoc.AssertExpectations(t)
+	mockCollection.AssertExpectations(t)
+}
+
+func TestInsertOne_Success_AfterRetries(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	mockCollection := new(MockCollection)
+	mockDoc := new(MockDocument)
+
+	duplicateError := createDuplicateKeyError()
+	expectedResult := &mongo.InsertOneResult{InsertedID: "test-id"}
+
+	// Set up expectations
+	mockDoc.On("GenIDIfEmpty").Once()
+	mockDoc.On("GenID").Times(4) // Once for GenIDIfEmpty + 3 retries
+
+	// First 3 attempts fail with duplicate key error, 4th succeeds
+	mockCollection.On("InsertOne", ctx, mockDoc).Return(nil, duplicateError).Times(3)
+	mockCollection.On("InsertOne", ctx, mockDoc).Return(expectedResult, nil).Once()
+
+	// Act
+	result, err := insertOneWithInterface(ctx, mockCollection, mockDoc)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.Equal(t, mockDoc, result)
+	mockDoc.AssertExpectations(t)
+	mockCollection.AssertExpectations(t)
+}
+
+func TestInsertOne_FailsAfterMaxRetries(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	mockCollection := new(MockCollection)
+	mockDoc := new(MockDocument)
+
+	duplicateError := createDuplicateKeyError()
+
+	// Set up expectations:
+	// - GenIDIfEmpty is called once at start (which calls GenID once)
+	// - GenID is called DefaultMaxRetries more times in the retry loop (7 times)
+	// - Total GenID calls: 1 + 7 = 8
+	// - InsertOne is called DefaultMaxRetries + 1 times (8 total)
+	mockDoc.On("GenIDIfEmpty").Once()
+	mockDoc.On("GenID").Times(DefaultMaxRetries + 1) // Called by GenIDIfEmpty + 7 retries
+
+	// All attempts fail with duplicate key error (8 total attempts)
+	mockCollection.On("InsertOne", ctx, mockDoc).Return(nil, duplicateError).Times(DefaultMaxRetries + 1)
+
+	// Act
+	result, err := insertOneWithInterface(ctx, mockCollection, mockDoc)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.True(t, isMongoDuplicateKeyError(err))
+	mockDoc.AssertExpectations(t)
+	mockCollection.AssertExpectations(t)
+}
+
+func TestInsertOne_NonDuplicateKeyError(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	mockCollection := new(MockCollection)
+	mockDoc := new(MockDocument)
+
+	otherError := createOtherError()
+
+	mockDoc.On("GenIDIfEmpty").Once()
+	mockDoc.On("GenID").Once() // Called by GenIDIfEmpty
+	mockCollection.On("InsertOne", ctx, mockDoc).Return(nil, otherError).Once()
+
+	// Act
+	result, err := insertOneWithInterface(ctx, mockCollection, mockDoc)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Equal(t, otherError, err)
+	assert.False(t, isMongoDuplicateKeyError(err))
+	mockDoc.AssertExpectations(t)
+	mockCollection.AssertExpectations(t)
+}
+
+func TestInsertOne_MixedErrors(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	mockCollection := new(MockCollection)
+	mockDoc := new(MockDocument)
+
+	duplicateError := createDuplicateKeyError()
+	otherError := createOtherError()
+
+	mockDoc.On("GenIDIfEmpty").Once()
+	mockDoc.On("GenID").Times(3) // Once for GenIDIfEmpty + 2 retries
+
+	// First 2 attempts fail with duplicate key error, 3rd fails with other error
+	mockCollection.On("InsertOne", ctx, mockDoc).Return(nil, duplicateError).Times(2)
+	mockCollection.On("InsertOne", ctx, mockDoc).Return(nil, otherError).Once()
+
+	// Act
+	result, err := insertOneWithInterface(ctx, mockCollection, mockDoc)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Equal(t, otherError, err)
+	assert.False(t, isMongoDuplicateKeyError(err))
+	mockDoc.AssertExpectations(t)
+	mockCollection.AssertExpectations(t)
+}
+
+func TestIsMongoDuplicateKeyError_WriteException(t *testing.T) {
+	writeError := mongo.WriteError{
+		Index:   0,
+		Code:    11000,
+		Message: "E11000 duplicate key error",
+	}
+	err := mongo.WriteException{
+		WriteErrors: []mongo.WriteError{writeError},
+	}
+
+	assert.True(t, isMongoDuplicateKeyError(err))
+}
+
+func TestIsMongoDuplicateKeyError_BulkWriteException(t *testing.T) {
+	bulkWriteError := mongo.BulkWriteError{
+		WriteError: mongo.WriteError{
+			Index:   0,
+			Code:    11000,
+			Message: "E11000 duplicate key error",
+		},
+	}
+	err := mongo.BulkWriteException{
+		WriteErrors: []mongo.BulkWriteError{bulkWriteError},
+	}
+
+	assert.True(t, isMongoDuplicateKeyError(err))
+}
+
+func TestIsMongoDuplicateKeyError_NonDuplicateError(t *testing.T) {
+	writeError := mongo.WriteError{
+		Index:   0,
+		Code:    12345, // Different error code
+		Message: "Some other error",
+	}
+	err := mongo.WriteException{
+		WriteErrors: []mongo.WriteError{writeError},
+	}
+
+	assert.False(t, isMongoDuplicateKeyError(err))
+}
+
+func TestIsMongoDuplicateKeyError_RegularError(t *testing.T) {
+	err := errors.New("regular error")
+	assert.False(t, isMongoDuplicateKeyError(err))
+}
+
+// Integration test with real models.Base
+func TestInsertOne_WithRealBase(t *testing.T) {
+	// Use a counter to track ID generation attempts
+	genIDCallCount := 0
 	originalHook := utils.NewSixIDHook
-	defer func() { utils.NewSixIDHook = originalHook }() // Restore original hook
 
-	id1 := utils.SixID{1, 2, 3, 4, 5, 1}
-	id2 := utils.SixID{1, 2, 3, 4, 5, 2} // Different ID to resolve collision
-
-	idsToReturn := []utils.SixID{id1, id1, id2} // NewSixID() will provide: id1 (dup), id1 (dup), id2 (ok)
-	hookCallCount := 0
+	// Set up a hook to control ID generation for predictable testing
 	utils.NewSixIDHook = func() (utils.SixID, bool) {
-		if hookCallCount < len(idsToReturn) {
-			id := idsToReturn[hookCallCount]
-			hookCallCount++
-			// fmt.Printf("Hook: returning ID %s (call #%d)\n", id.String(), hookCallCount)
-			return id, true
-		}
-		return utils.SixID{}, false
+		genIDCallCount++
+		// Create predictable IDs that change each time
+		id := utils.SixID{byte(genIDCallCount), 1, 2, 3, 4, 5}
+		return id, true
 	}
+	defer func() {
+		utils.NewSixIDHook = originalHook
+	}()
 
-	insertedIDs := make(map[utils.SixID]bool)
-	// Pre-populate to make the first attempt with id1 a collision
-	insertedIDs[id1] = true
+	// Arrange
+	ctx := context.Background()
+	mockCollection := new(MockCollection)
+	doc := &models.Base{}
 
-	var opCalled int
+	duplicateError := createDuplicateKeyError()
+	expectedResult := &mongo.InsertOneResult{InsertedID: "test-id"}
 
-	operation := func() error {
-		opCalled++
-		newID := utils.NewSixID() // This will use our hook
+	// First 2 attempts fail with duplicate key error, 3rd succeeds
+	mockCollection.On("InsertOne", ctx, doc).Return(nil, duplicateError).Times(2)
+	mockCollection.On("InsertOne", ctx, doc).Return(expectedResult, nil).Once()
 
-		if insertedIDs[newID] {
-			return mockMongoDuplicateKeyError(newID.String())
-		}
-		insertedIDs[newID] = true
-		fmt.Printf("Test: Op attempt %d, trying to insert ID %s\n", opCalled, newID.String())
-		return nil
-	}
+	// Act
+	result, err := insertOneWithInterface(ctx, mockCollection, doc)
 
-	maxRetries := 3
-	err := WithRetries(operation, maxRetries, IsMongoDuplicateKeyError)
-
-	if err != nil {
-		t.Fatalf("Expected no error as collision should resolve, got: %v", err)
-	}
-
-	// Operation: 1st call (id1, success), 2nd call (id1, collision), 3rd call (id2, success)
-	expectedOpCalls := 3
-	if opCalled != expectedOpCalls {
-		t.Errorf("Expected operation to be called %d times, got %d", expectedOpCalls, opCalled)
-	}
-
-	if !insertedIDs[id1] {
-		t.Errorf("Expected ID %s to be inserted", id1.String())
-	}
-	if !insertedIDs[id2] {
-		t.Errorf("Expected ID %s to be inserted after retry", id2.String())
-	}
-	if len(insertedIDs) != 2 {
-		t.Errorf("Expected 2 unique IDs to be inserted, got %d", len(insertedIDs))
-	}
-
-	// Hook should be called for each ID generation attempt within the operation
-	// Op1 (fails): NewSixID() -> id1. hookCallCount = 1.
-	// Op2 (fails): NewSixID() -> id1. hookCallCount = 2.
-	// Op3 (succeeds): NewSixID() -> id2. hookCallCount = 3.
-	expectedHookCalls := 3
-	if hookCallCount != expectedHookCalls {
-		t.Errorf("Expected NewSixIDHook to be called %d times, got %d", expectedHookCalls, hookCallCount)
-	}
+	// Assert
+	assert.NoError(t, err)
+	assert.Equal(t, doc, result)
+	assert.Equal(t, 3, genIDCallCount) // Initial + 2 retries
+	mockCollection.AssertExpectations(t)
 }

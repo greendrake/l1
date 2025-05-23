@@ -33,7 +33,7 @@ func TestRestListingHandler_GetListingByID_Success(t *testing.T) {
 
 	listingID := utils.NewSixID()
 	expectedListing := &models.Listing{
-		ID:          listingID,
+		Base:        models.Base{ID: listingID},
 		Title:       "Test Item",
 		Body:        "Description here",
 		CountryCode: "CA",
@@ -88,8 +88,8 @@ func TestRestListingHandler_SearchListings_Success(t *testing.T) {
 	query := "bike"
 	limit := 10
 	expectedListings := []models.Listing{
-		{ID: utils.NewSixID(), Title: "Mountain Bike"},
-		{ID: utils.NewSixID(), Title: "Road Bike"},
+		{Base: models.NewBase(), Title: "Mountain Bike"},
+		{Base: models.NewBase(), Title: "Road Bike"},
 	}
 	expectedCursor := "nextpagecursor"
 

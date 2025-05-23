@@ -50,7 +50,7 @@ type WebAuthnCredential struct {
 
 // User represents a user in the system.
 type User struct {
-	ID                      utils.SixID              `bson:"_id,omitempty" json:"id,omitempty"`
+	Base                    `bson:",inline"`
 	Name                    string                   `bson:"name" json:"name"`
 	Email                   string                   `bson:"email" json:"email"`
 	EmailChange             *EmailChange             `bson:"email_change,omitempty" json:"email_change,omitempty"`

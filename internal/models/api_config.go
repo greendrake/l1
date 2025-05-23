@@ -1,9 +1,5 @@
 package models
 
-import (
-	"greendrake/l1/internal/utils"
-)
-
 // APIType defines whether an endpoint is REST or JSON API.
 type APIType string
 
@@ -21,7 +17,7 @@ type RateLimitConfig struct {
 // APIEndpointConfig defines configuration for a specific API endpoint or method.
 // Stored in the `api_endpoints_config` collection.
 type APIEndpointConfig struct {
-	ID            utils.SixID      `bson:"_id,omitempty" json:"id,omitempty"`
+	Base          `bson:",inline"`
 	Type          APIType          `bson:"type" json:"type"`         // REST or JSON
 	Endpoint      string           `bson:"endpoint" json:"endpoint"` // Path for REST, method name for JSON
 	AuthRequired  bool             `bson:"auth_required" json:"auth_required"`

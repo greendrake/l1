@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -11,38 +10,13 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"greendrake/l1/internal/config"
 	"greendrake/l1/internal/models"
 	"greendrake/l1/internal/utils"
 )
 
-var testMongoURILinkedAction = ""
-
-func init() {
-	testMongoURILinkedAction = os.Getenv("MONGO_URI_TEST")
-	if testMongoURILinkedAction == "" {
-		testMongoURILinkedAction = "mongodb://localhost:27017"
-	}
-}
-
 func setupTestDBLinkedAction(t *testing.T, dbName string) *mongo.Database {
-	// Create a clean database for testing
-	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(testMongoURILinkedAction))
-	if err != nil {
-		t.Fatalf("Failed to connect to MongoDB: %v", err)
-	}
-
-	// Drop the database if it exists
-	err = client.Database(dbName).Drop(context.Background())
-	if err != nil {
-		// Ignore error if the database doesn't exist
-		t.Logf("Database drop error (may be normal): %v", err)
-	}
-
-	// Create a fresh database
-	db := client.Database(dbName)
-	return db
+	return utils.SetupTestDB(t, dbName, "linked_actions")
 }
 
 // mockUserServiceForLASTest is a local mock for IUserService
@@ -66,7 +40,7 @@ func (m *mockUserServiceForLASTest) SetUserCredentials(ctx context.Context, user
 func (m *mockUserServiceForLASTest) FindByID(ctx context.Context, userID utils.SixID) (*models.User, error) {
 	// For CreateEmailChangeActions, this might be called. Return a dummy user.
 	// If specific tests need specific user data, they can set expectations on this mock.
-	return &models.User{ID: userID, Email: "test@example.com"}, nil
+	return &models.User{Base: models.Base{ID: userID}, Email: "test@example.com"}, nil
 }
 func (m *mockUserServiceForLASTest) GetAllActiveUserIDs(ctx context.Context) ([]utils.SixID, error) {
 	return nil, nil
@@ -110,11 +84,8 @@ func TestLinkedActionService_CRUD(t *testing.T) {
 	// Use a unique database name for this test to isolate it
 	dbName := fmt.Sprintf("testdb_linked_action_service_crud_%d", time.Now().UnixNano())
 
-	// First drop the collection to ensure no leftover test data
+	// Setup database and service
 	db := setupTestDBLinkedAction(t, dbName)
-	collection := db.Collection("linked_actions")
-	err := collection.Drop(context.Background())
-	require.NoError(t, err)
 
 	// Setup config and service
 	cfg := &config.Config{LoginToSetupTTL: 1 * time.Hour, ResetAccessLinkTTL: 30 * time.Minute, EmailChangeTTL: 1 * time.Hour}

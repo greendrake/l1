@@ -8,7 +8,7 @@ import (
 
 // ListingEnquiry represents an enquiry made about a listing.
 type ListingEnquiry struct {
-	ID        utils.SixID  `bson:"_id,omitempty" json:"id,omitempty"`
+	Base      `bson:",inline"`
 	ListingID utils.SixID  `bson:"listing_id" json:"listing_id"`
 	UserID    utils.SixID  `bson:"user_id,omitempty" json:"user_id,omitempty"` // ID of user making enquiry (if logged in)
 	UserEmail string       `bson:"user_email" json:"user_email"`               // Reply-to email provided

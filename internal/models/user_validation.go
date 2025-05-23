@@ -17,7 +17,7 @@ const (
 // UserValidationType represents a configurable type of user validation available.
 // Stored in the `user_validation_types` collection.
 type UserValidationType struct {
-	ID         utils.SixID            `bson:"_id,omitempty" json:"id,omitempty"`
+	Base       `bson:",inline"`
 	Key        string                 `bson:"key" json:"key"` // e.g., "Domain Ownership", "eBay", "LinkedIn"
 	Type       ValidationType         `bson:"type" json:"type"`
 	Config     map[string]interface{} `bson:"config" json:"config"`           // YAML in DB, parsed to map[string]interface{}
@@ -28,7 +28,7 @@ type UserValidationType struct {
 // UserValidation represents an instance of a user attempting or completing a validation.
 // Stored in the `user_validations` collection.
 type UserValidation struct {
-	ID             utils.SixID            `bson:"_id,omitempty" json:"id,omitempty"`
+	Base           `bson:",inline"`
 	UserID         utils.SixID            `bson:"user_id" json:"user_id"`
 	TypeID         utils.SixID            `bson:"type_id" json:"type_id"`                 // Refers to UserValidationTypes collection
 	ValidationType ValidationType         `bson:"validation_type" json:"validation_type"` // Denormalized from TypeID for easier querying?

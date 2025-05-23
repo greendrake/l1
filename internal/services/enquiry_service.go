@@ -41,43 +41,19 @@ func (s *enquiryService) CreateEnquiry(ctx context.Context, listingID utils.SixI
 	// TODO: Validate email format?
 	// TODO: Check if listingID exists and is active/visible using listingService?
 
-	collection := s.db.Collection(enquiriesCollection)
 	now := time.Now().UTC()
 
-	var newEnquiry *models.ListingEnquiry
-	var err error
-
-	operation := func() error {
-		newEnquiry = &models.ListingEnquiry{
-			ID:        utils.NewSixID(), // ID generated on each attempt
-			ListingID: listingID,
-			UserEmail: userEmail,
-			Message:   message,
-			Offer:     offer,
-			CreatedAt: now,
-			Sent:      false, // Email sending handled by background task
-			Deleted:   false,
-		}
-		// Set UserID only if provided (for logged-in users)
-		if userID != nil {
-			newEnquiry.UserID = *userID
-		}
-		_, insertErr := collection.InsertOne(ctx, newEnquiry)
-		return insertErr
-	}
-
-	err = db.Try(operation)
-
-	if err != nil {
-		enquiryIDStr := "<unknown>"
-		if newEnquiry != nil {
-			enquiryIDStr = newEnquiry.ID.String()
-		}
-		return nil, fmt.Errorf("failed to insert new enquiry for listing %s (last attempted enquiry ID: %s) after multiple retries: %w",
-			listingID.String(), enquiryIDStr, err)
-	}
-
-	return newEnquiry, nil
+	doc, err := db.InsertOne(ctx, s.db.Collection(enquiriesCollection), &models.ListingEnquiry{
+		ListingID: listingID,
+		UserEmail: userEmail,
+		Message:   message,
+		UserID:    *userID,
+		Offer:     offer,
+		CreatedAt: now,
+		Sent:      false, // Email sending handled by background task
+		Deleted:   false,
+	})
+	return doc.(*models.ListingEnquiry), err
 }
 
 // TODO: Implement MarkEnquirySent used by background task

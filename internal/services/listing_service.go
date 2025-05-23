@@ -54,48 +54,27 @@ func NewListingService(db *mongo.Database, cfg *config.Config /*, userService IU
 
 // CreateListing creates a new listing document in a draft state.
 func (s *listingService) CreateListing(ctx context.Context, userID utils.SixID, title, body string, tags []string, locationID int, countryCode, shipping string, askingPrice *models.AskingPrice) (*models.Listing, error) {
-	collection := s.db.Collection(listingsCollection)
 	now := time.Now().UTC()
+	doc, err := db.InsertOne(ctx, s.db.Collection(listingsCollection), &models.Listing{
+		UserID:      userID,
+		Title:       title,
+		Body:        body,
+		Tags:        tags,
+		Images:      []string{},
+		LocationID:  locationID,
+		CountryCode: countryCode,
+		Shipping:    shipping,
+		AskingPrice: askingPrice,
+		IsDraft:     true,
+		Phantom:     false,
+		Hidden:      false,
+		Deleted:     false,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		PublishedAt: nil,
+	})
 
-	var newListing *models.Listing
-	var err error
-
-	operation := func() error {
-		newListing = &models.Listing{
-			ID:          utils.NewSixID(),
-			UserID:      userID,
-			Title:       title,
-			Body:        body,
-			Tags:        tags,
-			Images:      []string{},
-			LocationID:  locationID,
-			CountryCode: countryCode,
-			Shipping:    shipping,
-			AskingPrice: askingPrice,
-			IsDraft:     true,
-			Phantom:     false,
-			Hidden:      false,
-			Deleted:     false,
-			CreatedAt:   now,
-			UpdatedAt:   now,
-			PublishedAt: nil,
-		}
-		_, insertErr := collection.InsertOne(ctx, newListing)
-		return insertErr
-	}
-
-	err = db.Try(operation)
-
-	if err != nil {
-		listingIDStr := "<unknown>"
-		if newListing != nil {
-			listingIDStr = newListing.ID.String()
-		}
-		return nil, fmt.Errorf("failed to insert new listing for user %s (last attempted listing ID: %s) after multiple retries: %w",
-			userID.String(), listingIDStr, err)
-	}
-
-	return newListing, nil
+	return doc.(*models.Listing), err
 }
 
 // FindListingByID finds a non-deleted, non-suspended listing by its ID.
@@ -628,36 +607,20 @@ func (s *listingService) SuspendListing(ctx context.Context, listingID, adminUse
 		return fmt.Errorf("failed to find listing %s for suspension: %w", listingID.String(), err)
 	}
 
-	suspColl := s.db.Collection("listing_suspensions")
 	now := time.Now().UTC()
-
-	var susp models.ListingSuspension // Defined to be captured by the closure
-	// err is reused from the FindOne operation above for the suspension insertion operation
-
-	operation := func() error {
-		suspensionID := utils.NewSixID() // ID generated on each attempt for the suspension record
-		susp = models.ListingSuspension{
-			ID:         suspensionID,
-			ListingID:  listingID,
-			UserID:     adminUserID,
-			Reason:     reason,
-			ExecutedAt: &now,
-			Suspended:  true,
-		}
-		_, insertErr := suspColl.InsertOne(ctx, susp)
-		return insertErr
-	}
-
-	err = db.Try(operation)
+	doc, err := db.InsertOne(ctx, s.db.Collection("listing_suspensions"), &models.ListingSuspension{
+		ListingID:  listingID,
+		UserID:     adminUserID,
+		Reason:     reason,
+		ExecutedAt: &now,
+		Suspended:  true,
+	})
 
 	if err != nil {
-		suspensionIDStr := "<unknown>"
-		if susp.ID != (utils.SixID{}) {
-			suspensionIDStr = susp.ID.String()
-		}
-		return fmt.Errorf("failed to create listing suspension record for listing %s (last attempted suspension ID: %s) after multiple retries: %w",
-			listingID.String(), suspensionIDStr, err)
+		return err
 	}
+
+	susp := doc.(*models.ListingSuspension)
 
 	// Update the main listing document with the new suspension_id
 	update := bson.M{"$set": bson.M{

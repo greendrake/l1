@@ -2,45 +2,19 @@ package services
 
 import (
 	"context"
-	"os"
-	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
-	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"greendrake/l1/internal/config"
+	"greendrake/l1/internal/utils"
 )
 
-var testMongoURIConfig string
-
-func init() {
-	// Get current file path
-	_, filename, _, _ := runtime.Caller(0)
-	// Try to load .env from project root (3 levels up from this file)
-	projectRoot := filepath.Join(filepath.Dir(filename), "..", "..")
-	if err := godotenv.Load(filepath.Join(projectRoot, ".env")); err != nil {
-		// Try current directory as fallback
-		godotenv.Load()
-	}
-
-	testMongoURIConfig = os.Getenv("MONGO_URI_TEST")
-	if testMongoURIConfig == "" {
-		panic("MONGO_URI_TEST environment variable is required for tests")
-	}
-}
-
 func setupTestDBConfig(t *testing.T, dbName string) *mongo.Database {
-	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(testMongoURIConfig))
-	require.NoError(t, err, "Failed to connect to MongoDB")
-	db := client.Database(dbName)
-	_ = db.Collection("config").Drop(context.Background())
-	return db
+	return utils.SetupTestDB(t, dbName, "config")
 }
 
 func setupRedis(t *testing.T) *redis.Client {
